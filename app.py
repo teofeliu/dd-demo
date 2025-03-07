@@ -259,7 +259,7 @@ def process_product_image(uploaded_image):
     timing = {}
     start_total = time.time()
     
-    # Create a placeholder for status updates
+    # Create a placeholder for current status updates
     status_placeholder = st.empty()
     
     # Initialize sections for collapsible results
@@ -292,10 +292,12 @@ def process_product_image(uploaded_image):
     )
     extract_time = time.time() - extract_start
     
-    # Update status and display collapsible image analysis results
-    status_placeholder.write(f"✅ Image analyzed in {extract_time:.2f}s")
+    # Clear the status placeholder
+    status_placeholder.empty()
     
+    # Write permanent completion message
     with image_analysis_section:
+        st.write(f"✅ Image analyzed in {extract_time:.2f}s")
         with st.expander("Image Analysis Details"):
             st.json(product_details)
     
@@ -306,13 +308,18 @@ def process_product_image(uploaded_image):
     search_time = time.time() - search_start
     timing['amazon_search'] = search_time
     
+    # Clear the status placeholder
+    status_placeholder.empty()
+    
+    # Write permanent completion message
     with amazon_search_section:
+        st.write(f"✅ Amazon search completed in {search_time:.2f}s")
         with st.expander("Amazon Search Results"):
             st.json(amazon_results)
     
     # Check if we have results before proceeding
     if not amazon_results.get("results") or len(amazon_results["results"]) == 0:
-        status_placeholder.write("❌ No products found in Amazon search")
+        st.error("❌ No products found in Amazon search")
         return {
             "match_found": False,
             "top_match": None,
@@ -340,15 +347,28 @@ def process_product_image(uploaded_image):
     try:
         llm_verification = json.loads(verification_response.choices[0].message.content)
         verification_time = time.time() - verify_start
-        status_placeholder.write(f"✅ Verification completed in {verification_time:.2f}s")
-        timing['verification'] = verification_time
         
+        # Clear the status placeholder
+        status_placeholder.empty()
+        
+        # Write permanent completion message
         with verification_section:
+            st.write(f"✅ Verification completed in {verification_time:.2f}s")
             with st.expander("Verification Results"):
                 st.json(llm_verification)
                 
+        timing['verification'] = verification_time
+                
     except json.JSONDecodeError as e:
-        status_placeholder.write(f"❌ Error parsing verification response: {str(e)}")
+        # Clear the status placeholder
+        status_placeholder.empty()
+        
+        # Write permanent error message
+        with verification_section:
+            st.error(f"❌ Error parsing verification response: {str(e)}")
+            with st.expander("Verification Error"):
+                st.write(f"Raw response: {verification_response.choices[0].message.content[:500]}... (truncated)")
+        
         # Create a default fallback structure
         llm_verification = {
             "ranked_matches": [
@@ -359,10 +379,6 @@ def process_product_image(uploaded_image):
         }
         verification_time = time.time() - verify_start
         timing['verification'] = verification_time
-        
-        with verification_section:
-            with st.expander("Verification Error"):
-                st.write(f"Raw response: {verification_response.choices[0].message.content[:500]}... (truncated)")
     
     # Process and enhance the results with direct information from the Amazon API
     processing_start = time.time()
@@ -435,32 +451,55 @@ def process_product_image(uploaded_image):
     timing['results_processing'] = time.time() - processing_start
     timing['total_time'] = time.time() - start_total
     
-    # Clear the status placeholder to make room for results
+    # Clear the status placeholder
     status_placeholder.empty()
     
     # Print final match result
+    st.divider()  # Add a visual separator for the final results
+    
     if final_results["top_match"]:
         st.success("✨ Found a match on Amazon!")
-        st.write(f"**Title:** {final_results['top_match']['title']}")
+        
+        # Create columns for product details
+        col1, col2 = st.columns([1, 2])
+        
+        # Show product image in first column
+        if 'image' in final_results['top_match']:
+            image_url = final_results['top_match']['image']
+            if isinstance(image_url, dict) and 'link' in image_url:
+                image_url = image_url['link']
+            col1.image(image_url, width=200, use_container_width=False)
+        
+        # Show details in second column
+        col2.write(f"**Title:** {final_results['top_match']['title']}")
         if 'brand' in final_results['top_match']:
-            st.write(f"**Brand:** {final_results['top_match']['brand']}")
+            col2.write(f"**Brand:** {final_results['top_match']['brand']}")
         
         # Handle price display correctly
         price = final_results['top_match']['price']
         if isinstance(price, dict) and 'raw' in price:
-            st.write(f"**Price:** {price['raw']}")
+            col2.write(f"**Price:** {price['raw']}")
         elif price:
-            st.write(f"**Price:** {price}")
+            col2.write(f"**Price:** {price}")
             
         # Print link only if it exists
         if final_results['top_match']['link']:
-            st.write(f"**Link:** {final_results['top_match']['link']}")
-            st.markdown(f"[View on Amazon]({final_results['top_match']['link']})")
+            col2.markdown(f"[View on Amazon]({final_results['top_match']['link']})")
+            
+        # Discrepancies
+        if final_results.get('discrepancies'):
+            st.subheader("Potential discrepancies:")
+            for disc in final_results['discrepancies']:
+                st.write(f"- {disc}")
     else:
         st.error("❌ No suitable match found on Amazon")
     
     # Print overall timing
-    st.write(f"\n⏱️ **Total processing time:** {timing['total_time']:.2f} seconds")
+    st.write(f"⏱️ **Total processing time:** {timing['total_time']:.2f} seconds")
+    
+    # Overall processing details (in collapsed section)
+    with st.expander("Processing details"):
+        st.json(final_results)
     
     # Clean up the temporary file
     os.unlink(image_path)
@@ -482,28 +521,6 @@ if uploaded_file is not None:
     if st.button("Analyze Product"):
         with st.spinner(""):  # Empty spinner as we'll use our own status updates
             results = process_product_image(uploaded_file)
-        
-        # Display results in a nice format
-        if results["match_found"]:
-            # Create columns for product details
-            col1, col2 = st.columns([1, 2])
-            
-            # Show product image in first column
-            if 'top_match' in results and 'image' in results['top_match']:
-                image_url = results['top_match']['image']
-                if isinstance(image_url, dict) and 'link' in image_url:
-                    image_url = image_url['link']
-                col1.image(image_url, width=200, use_container_width=False)
-            
-            # Discrepancies
-            if results.get('discrepancies'):
-                st.subheader("Potential discrepancies:")
-                for disc in results['discrepancies']:
-                    st.write(f"- {disc}")
-            
-        # Overall processing details (in collapsed section)
-        with st.expander("Processing details"):
-            st.json(results)
 else:
     st.info("Please upload an image to begin analysis")
 

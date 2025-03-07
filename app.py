@@ -44,7 +44,8 @@ def amazon_search(search_parameters):
     """
     import requests
     
-    api_key = "FB0C32E1DCB3433C997C0A0FB1E70608"
+    # Get API key from streamlit secrets
+    api_key = st.secrets["rainforest"]["api_key"]
     base_url = "https://api.rainforestapi.com/request"
     
     # Configure request parameters
@@ -249,7 +250,7 @@ def extract_product_details_from_image_firesearch(image_path, client, timing=Non
     
     return product_details
 
-def process_product_image(uploaded_image, api_key):
+def process_product_image(uploaded_image):
     """Modified version to work with Streamlit file uploads"""
     import time
     import json
@@ -265,11 +266,11 @@ def process_product_image(uploaded_image, api_key):
         tmp_file.write(uploaded_image.getbuffer())
         image_path = tmp_file.name
     
-    # Initialize client
+    # Initialize client with API key from secrets
     client_start = time.time()
     client = OpenAI(
         base_url="https://api.fireworks.ai/inference/v1",
-        api_key=api_key
+        api_key=st.secrets["fireworks"]["api_key"]
     )
     timing['client_initialization'] = time.time() - client_start
     
@@ -284,22 +285,22 @@ def process_product_image(uploaded_image, api_key):
     extract_time = time.time() - extract_start
     
     # Display extracted information
-    print(f"✅ Image analyzed in {extract_time:.2f}s")
-    print(f"   Product: {product_details.get('brand', 'Unknown brand')} {product_details.get('product_name', 'Unknown product')}")
+    st.write(f"✅ Image analyzed in {extract_time:.2f}s")
+    st.write(f"   Product: {product_details.get('brand', 'Unknown brand')} {product_details.get('product_name', 'Unknown product')}")
     if product_details.get('product_size'):
-        print(f"   Size: {product_details.get('product_size')}")
+        st.write(f"   Size: {product_details.get('product_size')}")
     
     # Execute Amazon search using Rainforest API
     search_start = time.time()
-    print(f"\n🔎 Searching Amazon for matching products...")
+    st.write(f"\n🔎 Searching Amazon for matching products...")
     amazon_results = amazon_search(product_details)
     search_time = time.time() - search_start
-    print(f"✅ Amazon search completed in {search_time:.2f}s")
+    st.write(f"✅ Amazon search completed in {search_time:.2f}s")
     timing['amazon_search'] = search_time
     
     # Check if we have results before proceeding
     if not amazon_results.get("results") or len(amazon_results["results"]) == 0:
-        print("\n❌ No products found in Amazon search")
+        st.write("\n❌ No products found in Amazon search")
         return {
             "match_found": False,
             "top_match": None,
@@ -310,7 +311,7 @@ def process_product_image(uploaded_image, api_key):
     
     # Verify product match with LLM using JSON mode
     verify_start = time.time()
-    print(f"\n⚖️ Verifying matches...")
+    st.write(f"\n⚖️ Verifying matches...")
     verification_messages = [
         {"role": "system", "content": "Analyze the Amazon product results and determine how well they match the original product details. Assign a confidence score (0-1) to each result based on how closely it matches."},
         {"role": "user", "content": f"Compare these product details:\n\nOriginal product: {json.dumps(product_details)}\n\nAmazon results: {json.dumps(amazon_results)}\n\nFor each result, provide a confidence score and list any discrepancies. DO NOT include links or URLs in your response. Format your response as a JSON object with 'ranked_matches' (array of objects with 'asin', 'confidence_score', and 'discrepancies' fields) and 'general_discrepancies' (array of strings)."}
@@ -326,10 +327,10 @@ def process_product_image(uploaded_image, api_key):
     # Parse verification results with error handling
     try:
         llm_verification = json.loads(verification_response.choices[0].message.content)
-        print(f"✅ Verification completed successfully")
+        st.write(f"✅ Verification completed successfully")
     except json.JSONDecodeError as e:
-        print(f"❌ Error parsing verification response: {str(e)}")
-        print(f"Raw response: {verification_response.choices[0].message.content[:500]}... (truncated)")
+        st.write(f"❌ Error parsing verification response: {str(e)}")
+        st.write(f"Raw response: {verification_response.choices[0].message.content[:500]}... (truncated)")
         # Create a default fallback structure
         llm_verification = {
             "ranked_matches": [
@@ -340,12 +341,12 @@ def process_product_image(uploaded_image, api_key):
         }
     
     verification_time = time.time() - verify_start
-    print(f"⏱️ Verification took {verification_time:.2f}s")
+    st.write(f"⏱️ Verification took {verification_time:.2f}s")
     timing['verification'] = verification_time
     
     # Process and enhance the results with direct information from the Amazon API
     processing_start = time.time()
-    print(f"\n🏁 Processing final results...")
+    st.write(f"\n🏁 Processing final results...")
     
     # Create the final output structure
     final_results = {
@@ -416,30 +417,29 @@ def process_product_image(uploaded_image, api_key):
     
     # Print final match result
     if final_results["top_match"]:
-        print("\n✨ Found a match on Amazon!")
-        print(f"   Title: {final_results['top_match']['title']}")
+        st.write("\n✨ Found a match on Amazon!")
+        st.write(f"   Title: {final_results['top_match']['title']}")
         if 'brand' in final_results['top_match']:
-            print(f"   Brand: {final_results['top_match']['brand']}")
+            st.write(f"   Brand: {final_results['top_match']['brand']}")
         
         # Handle price display correctly
         price = final_results['top_match']['price']
         if isinstance(price, dict) and 'raw' in price:
-            print(f"   Price: {price['raw']}")
+            st.write(f"   Price: {price['raw']}")
         elif price:
-            print(f"   Price: {price}")
+            st.write(f"   Price: {price}")
             
         # Print link only if it exists
         if final_results['top_match']['link']:
-            print(f"   Link: {final_results['top_match']['link']}")
+            st.write(f"   Link: {final_results['top_match']['link']}")
         else:
-            print("   Link: Not available")
+            st.write("   Link: Not available")
     else:
-        print("\n❌ No suitable match found on Amazon")
+        st.write("\n❌ No suitable match found on Amazon")
     
     # Print overall timing
-    print(f"\n⏱️ Total processing time: {timing['total_time']:.2f} seconds")
+    st.write(f"\n⏱️ Total processing time: {timing['total_time']:.2f} seconds")
     
-
     # Clean up the temporary file
     os.unlink(image_path)
     
@@ -449,20 +449,17 @@ def process_product_image(uploaded_image, api_key):
 st.title("Product Image Analyzer")
 st.write("Upload a product image to search for it on Amazon")
 
-# API key input (preferably use st.secrets in production)
-api_key = st.text_input("Enter your Fireworks API key:", type="password")
-
 # File uploader
 uploaded_file = st.file_uploader("Choose a product image...", type=["png", "jpg", "jpeg"])
 
-if uploaded_file is not None and api_key:
+if uploaded_file is not None:
     # Display the uploaded image
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+    st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
     
     # Process button
     if st.button("Analyze Product"):
         with st.spinner("Processing..."):
-            results = process_product_image(uploaded_file, api_key)
+            results = process_product_image(uploaded_file)
         
         # Display results in a nice format
         if results["match_found"]:
@@ -476,7 +473,7 @@ if uploaded_file is not None and api_key:
                 image_url = results['top_match']['image']
                 if isinstance(image_url, dict) and 'link' in image_url:
                     image_url = image_url['link']
-                col1.image(image_url, width=200)
+                col1.image(image_url, width=200, use_container_width=False)
             
             # Show details in second column
             if 'top_match' in results:
@@ -511,5 +508,5 @@ if uploaded_file is not None and api_key:
             st.write(f"Total processing time: {results['timing']['total_time']:.2f} seconds")
             st.json(results)
 else:
-    st.info("Please upload an image and enter your API key to begin analysis")
+    st.info("Please upload an image to begin analysis")
 

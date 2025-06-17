@@ -35,7 +35,7 @@ class ProductVerification(BaseModel):
     matched_product: Optional[Dict] = Field(None, description="Details of the matched product")
     discrepancies: Optional[List[str]] = Field(None, description="List of discrepancies between image and found product")
 
-def amazon_search(search_parameters):
+def amazon_search(search_parameters, rainforest_api_key):
     """
     Search Amazon for products matching parameters extracted from a product image.
     
@@ -44,8 +44,8 @@ def amazon_search(search_parameters):
     """
     import requests
     
-    # Get API key from streamlit secrets
-    api_key = st.secrets["rainforest"]["api_key"]
+    # Use the provided API key
+    api_key = rainforest_api_key
     base_url = "https://api.rainforestapi.com/request"
     
     # Configure request parameters
@@ -122,7 +122,7 @@ def amazon_search(search_parameters):
             "results": []
         }
     
-def extract_product_details_from_image_mixtral(image_path, client, model_id="accounts/fireworks/models/mixtral-8x7b-instruct", timing=None):
+def extract_product_details_from_image_mixtral(image_path, client, model_id="accounts/fireworks/models/qwen2p5-vl-32b-instruct", timing=None):
     """
     Extract product details from an image using document inlining and a specified model.
     
@@ -250,7 +250,7 @@ def extract_product_details_from_image_firesearch(image_path, client, timing=Non
     
     return product_details
 
-def process_product_image(uploaded_image):
+def process_product_image(uploaded_image, fireworks_api_key, rainforest_api_key):
     """Modified version to work with Streamlit file uploads"""
     import time
     import json
@@ -278,7 +278,7 @@ def process_product_image(uploaded_image):
     client_start = time.time()
     client = OpenAI(
         base_url="https://api.fireworks.ai/inference/v1",
-        api_key=st.secrets["fireworks"]["api_key"]
+        api_key=fireworks_api_key
     )
     timing['client_initialization'] = time.time() - client_start
     
@@ -304,7 +304,7 @@ def process_product_image(uploaded_image):
     # Execute Amazon search using Rainforest API
     search_start = time.time()
     status_placeholder.write(f"🔎 Searching Amazon for matching products...")
-    amazon_results = amazon_search(product_details)
+    amazon_results = amazon_search(product_details, rainforest_api_key)
     search_time = time.time() - search_start
     timing['amazon_search'] = search_time
     
@@ -510,6 +510,46 @@ def process_product_image(uploaded_image):
 st.title("Product Image Analyzer")
 st.write("Upload a product image to search for it on Amazon")
 
+# API Key configuration section
+st.sidebar.header("API Configuration")
+
+# Try to get API keys from secrets first (for developer's deployment)
+try:
+    default_fireworks_key = st.secrets["fireworks"]["api_key"]
+    default_rainforest_key = st.secrets["rainforest"]["api_key"]
+    st.sidebar.success("✅ API keys loaded from configuration")
+except:
+    default_fireworks_key = ""
+    default_rainforest_key = ""
+    st.sidebar.write("This app requires two API keys to function:")
+
+# Fireworks API key input
+fireworks_api_key = st.sidebar.text_input(
+    "Fireworks AI API Key", 
+    value=default_fireworks_key,
+    type="password",
+    help="Get your API key from https://fireworks.ai"
+)
+
+# Rainforest API key input  
+rainforest_api_key = st.sidebar.text_input(
+    "Rainforest API Key", 
+    value=default_rainforest_key,
+    type="password",
+    help="Get your API key from https://rainforestapi.com"
+)
+
+# Check if API keys are provided
+if not fireworks_api_key or not rainforest_api_key:
+    st.warning("⚠️ Please enter both API keys in the sidebar to use this app.")
+    st.info("""
+    **To get started:**
+    1. Get a Fireworks AI API key from [fireworks.ai](https://fireworks.ai)
+    2. Get a Rainforest API key from [rainforestapi.com](https://rainforestapi.com)
+    3. Enter both keys in the sidebar
+    4. Upload a product image to analyze
+    """)
+
 # File uploader
 uploaded_file = st.file_uploader("Choose a product image...", type=["png", "jpg", "jpeg"])
 
@@ -519,8 +559,11 @@ if uploaded_file is not None:
     
     # Process button
     if st.button("Analyze Product"):
-        with st.spinner(""):  # Empty spinner as we'll use our own status updates
-            results = process_product_image(uploaded_file)
+        if not fireworks_api_key or not rainforest_api_key:
+            st.error("Please provide both API keys in the sidebar first.")
+        else:
+            with st.spinner(""):  # Empty spinner as we'll use our own status updates
+                results = process_product_image(uploaded_file, fireworks_api_key, rainforest_api_key)
 else:
     st.info("Please upload an image to begin analysis")
 

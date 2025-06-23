@@ -122,7 +122,7 @@ def amazon_search(search_parameters, rainforest_api_key):
             "results": []
         }
     
-def extract_product_details_from_image_mixtral(image_path, client, model_id="accounts/fireworks/models/qwen2p5-vl-32b-instruct", timing=None):
+def extract_product_details_from_image(image_path, client, model_id="accounts/fireworks/models/llama-v3p1-8b-instruct", timing=None):
     """
     Extract product details from an image using document inlining and a specified model.
     
@@ -182,7 +182,10 @@ def extract_product_details_from_image_mixtral(image_path, client, model_id="acc
     )
     
     # Parse extracted product details
-    product_details = json.loads(extract_response.choices[0].message.content)
+    content = extract_response.choices[0].message.content
+    if content.startswith("<think>"):
+        content = content.split("</think>", 1)[1].strip()
+    product_details = json.loads(content)
     
     if timing is not None:
         timing['product_extraction'] = time.time() - extract_start
@@ -285,7 +288,7 @@ def process_product_image(uploaded_image, fireworks_api_key, rainforest_api_key)
     # Extract product details from the image
     extract_start = time.time()
     status_placeholder.write("📷 Analyzing image with AI... ")
-    product_details = extract_product_details_from_image_mixtral(
+    product_details = extract_product_details_from_image(
         image_path=image_path,
         client=client,
         timing=timing
@@ -337,7 +340,7 @@ def process_product_image(uploaded_image, fireworks_api_key, rainforest_api_key)
     ]
     
     verification_response = client.chat.completions.create(
-        model="accounts/fireworks/models/mixtral-8x7b-instruct",
+        model="accounts/fireworks/models/llama-v3p1-8b-instruct",
         messages=verification_messages,
         response_format={"type": "json_object"},
         max_tokens=1000
@@ -450,6 +453,8 @@ def process_product_image(uploaded_image, fireworks_api_key, rainforest_api_key)
     
     timing['results_processing'] = time.time() - processing_start
     timing['total_time'] = time.time() - start_total
+    # Calculate Fireworks processing time (total time minus Amazon search time)
+    timing['fireworks_processing'] = timing['total_time'] - timing.get('amazon_search', 0)
     
     # Clear the status placeholder
     status_placeholder.empty()
@@ -496,6 +501,7 @@ def process_product_image(uploaded_image, fireworks_api_key, rainforest_api_key)
     
     # Print overall timing
     st.write(f"⏱️ **Total processing time:** {timing['total_time']:.2f} seconds")
+    st.write(f"🪄 **Fireworks processing time:** {timing['fireworks_processing']:.2f} seconds")
     
     # Overall processing details (in collapsed section)
     with st.expander("Processing details"):
